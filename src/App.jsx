@@ -1219,8 +1219,15 @@ function QueueTab({ queue, current, moratorium, callNext, completeMeeting, push,
     if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1);
     const delayUntil = d.toISOString();
     
-    const newQueue = queue.map(x => x.id === adminDelayTarget ? { ...x, delayed: true, delayUntil } : x);
-    await sset(SK.QUEUE, newQueue);
+    if (current && current.id === adminDelayTarget) {
+      const delayedEntry = { ...current, delayed: true, delayUntil };
+      const newQueue = [delayedEntry, ...queue];
+      await sset(SK.QUEUE, newQueue);
+      await sset(SK.CURRENT, null);
+    } else {
+      const newQueue = queue.map(x => x.id === adminDelayTarget ? { ...x, delayed: true, delayUntil } : x);
+      await sset(SK.QUEUE, newQueue);
+    }
     push('User rescheduled.', 'success');
     setAdminDelayTarget(null);
     setAdminDelayTime('');
@@ -1251,9 +1258,14 @@ function QueueTab({ queue, current, moratorium, callNext, completeMeeting, push,
               </div>
               {current.delayed && <span className="mq-chip crimson" style={{ marginTop: 6 }}>Returning from delay</span>}
             </div>
-            <button className="mq-btn mq-btn-gold" onClick={completeMeeting}>
-              <CheckCircle2 size={14} /> Mark Complete
-            </button>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button className="mq-btn mq-btn-ghost" onClick={() => setAdminDelayTarget(current.id)}>
+                <Clock size={14} /> Reschedule
+              </button>
+              <button className="mq-btn mq-btn-gold" onClick={completeMeeting}>
+                <CheckCircle2 size={14} /> Mark Complete
+              </button>
+            </div>
           </div>
         ) : (
           <div className="mq-card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
