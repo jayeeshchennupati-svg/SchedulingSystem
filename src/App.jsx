@@ -103,7 +103,7 @@ const seedIfEmpty = async () => {
   const users = await sget(SK.USERS, null);
   if (!users) {
     await sset(SK.USERS, [
-      { id: 'admin', email: 'admin@queue.local', password: 'ChangeMeAdmin123!', name: 'Executive Assistant', role: 'EA', verified: true },
+      { id: 'admin', email: 'admin@powermech.net', password: 'admin@P0wer', name: 'Executive Assistant', role: 'EA', verified: true },
       { id: 'pres', email: 'president@queue.local', password: 'ChangeMePres123!', name: 'The President', role: 'PRESIDENT', verified: true },
     ]);
   }
@@ -1423,9 +1423,27 @@ function SettingsTab({ domains, allUsers, push, refresh }) {
                 <div style={{ fontSize: '0.95rem', color: 'var(--ivory)' }}>{u.name}</div>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{u.email}</div>
               </div>
-              <span className={`mq-chip ${u.role === 'PRESIDENT' ? 'gold' : u.role === 'EA' ? 'emerald' : ''}`}>
-                {u.role}
-              </span>
+              {user.email === 'admin@powermech.net' && user.id !== u.id ? (
+                <select 
+                  value={u.role} 
+                  onChange={async (e) => {
+                    const updatedUsers = allUsers.map(usr => usr.id === u.id ? { ...usr, role: e.target.value } : usr);
+                    await sset(SK.USERS, updatedUsers);
+                    refresh();
+                    push(`${u.name} is now ${e.target.value}`, 'success');
+                  }}
+                  className="mq-input"
+                  style={{ width: 'auto', padding: '4px 8px', fontSize: '0.8rem', background: 'var(--bg-deep)', height: '32px' }}
+                >
+                  <option value="EMPLOYEE">Employee</option>
+                  <option value="EA">EA</option>
+                  <option value="PRESIDENT">President</option>
+                </select>
+              ) : (
+                <span className={`mq-chip ${u.role === 'PRESIDENT' ? 'gold' : u.role === 'EA' ? 'emerald' : ''}`}>
+                  {u.role}
+                </span>
+              )}
             </div>
           ))}
         </div>
