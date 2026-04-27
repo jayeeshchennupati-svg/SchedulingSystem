@@ -658,6 +658,8 @@ function AuthScreen({ onLogin, push, onUsersChanged }) {
 // ============ EMPLOYEE VIEW ============
 function EmployeeView({ user, push, refresh, queue, current, moratorium }) {
   const [showForm, setShowForm] = useState(false);
+  const [showDelayPicker, setShowDelayPicker] = useState(false);
+  const [delayTime, setDelayTime] = useState('');
   const [purpose, setPurpose] = useState('');
   const [topic, setTopic] = useState('');
   const [duration, setDuration] = useState('15');
@@ -696,7 +698,12 @@ function EmployeeView({ user, push, refresh, queue, current, moratorium }) {
   };
 
   const requestDelay = async () => {
-    const delayUntil = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    if (!delayTime) return push('Please select a time', 'error');
+    const [h, m] = delayTime.split(':');
+    const d = new Date();
+    d.setHours(parseInt(h), parseInt(m), 0, 0);
+    if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1);
+    const delayUntil = d.toISOString();
     const delayedHistory = await sget(SK.DELAYED, []);
 
     if (myCurrent) {
@@ -704,23 +711,22 @@ function EmployeeView({ user, push, refresh, queue, current, moratorium }) {
       if (!cur || cur.userId !== user.id) return;
       const delayedEntry = { ...cur, delayed: true, delayUntil };
       const q = await sget(SK.QUEUE, []);
-      const newQueue = insertDelayed(q, delayedEntry);
-      await sset(SK.QUEUE, newQueue);
+      await sset(SK.QUEUE, [delayedEntry, ...q]);
       await sset(SK.DELAYED, [...delayedHistory, cur.userId]);
       await sset(SK.CURRENT, null);
-      push('Meeting delayed by 30 minutes. You have been requeued.', 'success');
+      push(`Meeting delayed until ${delayTime}.`, 'success');
+      setShowDelayPicker(false);
       refresh();
       return;
     }
 
-    if (isFirstInLine && myEntry) {
+    if (myEntry) {
       const q = await sget(SK.QUEUE, []);
-      const remaining = q.filter(x => x.id !== myEntry.id);
-      const delayedEntry = { ...myEntry, delayed: true, delayUntil };
-      const newQueue = insertDelayed(remaining, delayedEntry);
+      const newQueue = q.map(x => x.id === myEntry.id ? { ...x, delayed: true, delayUntil } : x);
       await sset(SK.QUEUE, newQueue);
-      await sset(SK.DELAYED, [...delayedHistory, myEntry.userId]);
-      push('Your turn has been delayed by 30 minutes.', 'success');
+      if (!myEntry.delayed) await sset(SK.DELAYED, [...delayedHistory, myEntry.userId]);
+      push(`Meeting delayed until ${delayTime}.`, 'success');
+      setShowDelayPicker(false);
       refresh();
     }
   };
@@ -776,8 +782,8 @@ function EmployeeView({ user, push, refresh, queue, current, moratorium }) {
           <Crown size={40} color="var(--gold)" style={{ marginBottom: 12 }} />
           <h2 className="mq-display" style={{ fontSize: '2rem', color: 'var(--gold)', margin: '0 0 8px' }}>You are being summoned</h2>
           <p style={{ color: 'var(--text-secondary)', margin: '0 0 24px' }}>The President will see you now</p>
-          <button className="mq-btn mq-btn-ghost" onClick={requestDelay}>
-            <Clock size={14} /> Request 30-min Delay
+          <button className="mq-btn mq-btn-ghost" onClick={() => setShowDelayPicker(true)}>
+            <Clock size={14} /> Schedule for Later
           </button>
         </div>
       )}
@@ -799,6 +805,9 @@ function EmployeeView({ user, push, refresh, queue, current, moratorium }) {
             You will receive an email notification when you are next in line. Please remain ready.
           </div>
           <div style={{ marginTop: 24, display: 'flex', gap: 12, justifyContent: 'center' }}>
+            <button className="mq-btn mq-btn-ghost" onClick={() => setShowDelayPicker(true)}>
+              <Clock size={14} /> Schedule for Later
+            </button>
             <button className="mq-btn mq-btn-danger" onClick={cancelRequest}>
               <X size={14} /> Withdraw Request
             </button>
@@ -839,7 +848,7 @@ function EmployeeView({ user, push, refresh, queue, current, moratorium }) {
             <button className="mq-btn mq-btn-gold" onClick={joinMeetingNow} style={{ padding: '1rem 2rem', fontSize: '0.9rem' }}>
               <Play size={16} /> Join Meeting Now
             </button>
-            <button className="mq-btn mq-btn-ghost" onClick={requestDelay} style={{ padding: '1rem 2rem', fontSize: '0.9rem' }}>
+            <button className="mq-btn mq-btn-ghost" onClick={() => setShowDelayPicker(true)} style={{ padding: '1rem 2rem', fontSize: '0.9rem' }}>
               <Clock size={16} /> Schedule for Later
             </button>
           </div>
@@ -880,27 +889,25 @@ function EmployeeView({ user, push, refresh, queue, current, moratorium }) {
           </div>
         </div>
       )}
+      {showDelayPicker && (
+        <div className="mq-modal-bg" onClick={() => setShowDelayPicker(false)}>
+          <div className="mq-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+            <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border)' }}>
+              <h2 className="mq-display" style={{ fontSize: '1.4rem', margin: 0, color: 'var(--ivory)' }}>Schedule for Later</h2>
+            </div>
+            <div style={{ padding: '1.5rem' }}>
+              <label className="mq-label">Select Time</label>
+              <input type="time" className="mq-input" value={delayTime} onChange={e => setDelayTime(e.target.value)} style={{ fontSize: '1.2rem', marginBottom: 20 }} />
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button className="mq-btn mq-btn-ghost" onClick={() => setShowDelayPicker(false)}>Cancel</button>
+                <button className="mq-btn mq-btn-gold" onClick={requestDelay}>Confirm Delay</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
-}
-
-// ============ INSERT DELAYED LOGIC ============
-// Per spec: insert at the latest position among already-delayed people in queue,
-// but earliest spot (besides position 1) of those who haven't been delayed.
-function insertDelayed(queue, delayedEntry) {
-  // Find indices of already-delayed entries currently in queue
-  const delayedIdxs = queue.map((q, i) => q.delayed ? i : -1).filter(i => i !== -1);
-  let insertAt;
-  if (delayedIdxs.length === 0) {
-    // No other delayed entries -> position 2 (index 1) per spec, but if queue length < 1, then end
-    insertAt = Math.min(1, queue.length);
-  } else {
-    // After the last delayed entry
-    insertAt = Math.max(...delayedIdxs) + 1;
-  }
-  const newQ = [...queue];
-  newQ.splice(insertAt, 0, delayedEntry);
-  return newQ;
 }
 
 // ============ ADMIN / EA / PRESIDENT VIEW ============
@@ -915,7 +922,9 @@ function AdminView({ user, push, refresh, queue, current, moratorium, history, a
     if (current) return push('A meeting is already in progress.', 'error');
     if (queue.length === 0) return push('Queue is empty.', 'info');
     const q = [...queue];
-    const next = q.shift();
+    const activeIndex = q.findIndex(x => !x.delayed || Date.now() >= new Date(x.delayUntil).getTime());
+    if (activeIndex === -1) return push('No users are currently available (all delayed).', 'info');
+    const [next] = q.splice(activeIndex, 1);
     await sset(SK.QUEUE, q);
     await sset(SK.CURRENT, { ...next, calledAt: new Date().toISOString() });
     await sendEmail({
@@ -1085,6 +1094,11 @@ const isToday = (iso) => {
 function QueueTab({ queue, current, moratorium, callNext, completeMeeting, push, refresh }) {
   const [dragIdx, setDragIdx] = useState(null);
   const [overIdx, setOverIdx] = useState(null);
+  const [adminDelayTarget, setAdminDelayTarget] = useState(null);
+  const [adminDelayTime, setAdminDelayTime] = useState('');
+
+  const activeQueue = useMemo(() => queue.filter(q => !q.delayed || Date.now() >= new Date(q.delayUntil).getTime()), [queue]);
+  const delayedQueue = useMemo(() => queue.filter(q => q.delayed && Date.now() < new Date(q.delayUntil).getTime()), [queue]);
 
   const onDragStart = (i) => setDragIdx(i);
   const onDragOver = (e, i) => { e.preventDefault(); setOverIdx(i); };
@@ -1092,12 +1106,37 @@ function QueueTab({ queue, current, moratorium, callNext, completeMeeting, push,
   const onDrop = async (e, i) => {
     e.preventDefault();
     if (dragIdx === null || dragIdx === i) return onDragEnd();
+    
+    const draggedItem = activeQueue[dragIdx];
+    const targetItem = activeQueue[i];
+
     const newQ = [...queue];
-    const [moved] = newQ.splice(dragIdx, 1);
-    newQ.splice(i, 0, moved);
+    const actualDragIdx = newQ.findIndex(x => x.id === draggedItem.id);
+    const [moved] = newQ.splice(actualDragIdx, 1);
+    
+    const actualTargetIdx = newQ.findIndex(x => x.id === targetItem.id);
+    newQ.splice(actualTargetIdx, 0, moved);
+
     await sset(SK.QUEUE, newQ);
     push('Queue reordered.', 'success');
     onDragEnd();
+    refresh();
+  };
+
+  const adminRequestDelay = async () => {
+    if (!adminDelayTarget) return;
+    if (!adminDelayTime) return push('Please select a time', 'error');
+    const [h, m] = adminDelayTime.split(':');
+    const d = new Date();
+    d.setHours(parseInt(h), parseInt(m), 0, 0);
+    if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1);
+    const delayUntil = d.toISOString();
+    
+    const newQueue = queue.map(x => x.id === adminDelayTarget ? { ...x, delayed: true, delayUntil } : x);
+    await sset(SK.QUEUE, newQueue);
+    push('User rescheduled.', 'success');
+    setAdminDelayTarget(null);
+    setAdminDelayTime('');
     refresh();
   };
 
@@ -1151,10 +1190,10 @@ function QueueTab({ queue, current, moratorium, callNext, completeMeeting, push,
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
           <div>
             <h3 className="mq-section-title" style={{ fontSize: '1.4rem' }}>The Queue</h3>
-            <p className="mq-section-sub">Drag to reorder · {queue.length} awaiting</p>
+            <p className="mq-section-sub">Drag to reorder · {activeQueue.length} active, {delayedQueue.length} scheduled for later</p>
           </div>
         </div>
-        {queue.length === 0 ? (
+        {activeQueue.length === 0 && delayedQueue.length === 0 ? (
           <div className="mq-card" style={{ padding: '3rem 2rem', textAlign: 'center' }}>
             <Users size={36} color="var(--gold-dim)" style={{ marginBottom: 12 }} />
             <p style={{ color: 'var(--text-secondary)', margin: 0, fontFamily: 'Cormorant Garamond, serif', fontSize: '1.1rem', fontStyle: 'italic' }}>
@@ -1163,10 +1202,10 @@ function QueueTab({ queue, current, moratorium, callNext, completeMeeting, push,
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {queue.map((q, i) => (
+            {activeQueue.map((q, i) => (
               <div
                 key={q.id}
-                className={`mq-tile ${dragIdx === i ? 'dragging' : ''} ${overIdx === i ? 'drag-over' : ''} ${q.delayed ? 'delayed-tile' : ''}`}
+                className={`mq-tile ${dragIdx === i ? 'dragging' : ''} ${overIdx === i ? 'drag-over' : ''}`}
                 draggable
                 onDragStart={() => onDragStart(i)}
                 onDragOver={(e) => onDragOver(e, i)}
@@ -1178,20 +1217,75 @@ function QueueTab({ queue, current, moratorium, callNext, completeMeeting, push,
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <div style={{ fontWeight: 600, color: 'var(--ivory)' }}>{q.userName}</div>
-                    {q.delayed && <span className="mq-chip crimson">Delayed</span>}
                     <span className="mq-chip">{q.duration}m</span>
                   </div>
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {q.topic} — {q.purpose}
                   </div>
                 </div>
-                <button onClick={() => removeFromQueue(q.id)} style={{ background: 'transparent', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', padding: 6 }}>
-                  <X size={16} />
-                </button>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button onClick={() => setAdminDelayTarget(q.id)} style={{ background: 'transparent', border: 'none', color: 'var(--gold)', cursor: 'pointer', padding: 6 }} title="Reschedule">
+                    <Clock size={16} />
+                  </button>
+                  <button onClick={() => removeFromQueue(q.id)} style={{ background: 'transparent', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', padding: 6 }} title="Remove">
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
             ))}
+            
+            {delayedQueue.length > 0 && (
+              <div style={{ marginTop: 24 }}>
+                <h4 className="mq-section-sub" style={{ margin: '0 0 12px', color: 'var(--gold)' }}>Scheduled for Later</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {delayedQueue.map((q) => (
+                    <div key={q.id} className="mq-tile delayed-tile" style={{ opacity: 0.8, cursor: 'default' }}>
+                      <Clock size={16} color="var(--crimson)" style={{ flexShrink: 0, marginLeft: 8 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                          <div style={{ fontWeight: 600, color: 'var(--ivory)' }}>{q.userName}</div>
+                          <span className="mq-chip crimson">
+                            Delayed until {new Date(q.delayUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                          {q.topic}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button onClick={() => setAdminDelayTarget(q.id)} style={{ background: 'transparent', border: 'none', color: 'var(--gold)', cursor: 'pointer', padding: 6 }} title="Reschedule">
+                          <Clock size={16} />
+                        </button>
+                        <button onClick={() => removeFromQueue(q.id)} style={{ background: 'transparent', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', padding: 6 }} title="Remove">
+                          <X size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
+      </div>
+
+      {adminDelayTarget && (
+        <div className="mq-modal-bg" onClick={() => setAdminDelayTarget(null)}>
+          <div className="mq-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+            <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border)' }}>
+              <h2 className="mq-display" style={{ fontSize: '1.4rem', margin: 0, color: 'var(--ivory)' }}>Reschedule User</h2>
+            </div>
+            <div style={{ padding: '1.5rem' }}>
+              <label className="mq-label">Select Time</label>
+              <input type="time" className="mq-input" value={adminDelayTime} onChange={e => setAdminDelayTime(e.target.value)} style={{ fontSize: '1.2rem', marginBottom: 20 }} />
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button className="mq-btn mq-btn-ghost" onClick={() => setAdminDelayTarget(null)}>Cancel</button>
+                <button className="mq-btn mq-btn-gold" onClick={adminRequestDelay}>Confirm</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );
