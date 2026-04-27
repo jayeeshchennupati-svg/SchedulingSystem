@@ -1035,7 +1035,7 @@ function AdminView({ user, push, refresh, queue, current, moratorium, history, a
       )}
       {tab === 'history' && <HistoryTab history={history} />}
       {tab === 'reports' && <ReportsTab history={history} push={push} />}
-      {tab === 'settings' && <SettingsTab domains={domains} allUsers={allUsers} push={push} refresh={refresh} />}
+      {tab === 'settings' && <SettingsTab user={user} domains={domains} allUsers={allUsers} push={push} refresh={refresh} />}
 
       {showMorat && (
         <div className="mq-modal-bg" onClick={() => setShowMorat(false)}>
@@ -1371,7 +1371,7 @@ function ReportsTab({ history, push }) {
 }
 
 // ============ SETTINGS TAB ============
-function SettingsTab({ domains, allUsers, push, refresh }) {
+function SettingsTab({ user, domains, allUsers, push, refresh }) {
   const [newDomain, setNewDomain] = useState('');
 
   const addDomain = async () => {
